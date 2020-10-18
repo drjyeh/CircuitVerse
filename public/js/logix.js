@@ -1417,13 +1417,10 @@ CircuitElement.prototype.changePropagationDelay = function(delay) {
 CircuitElement.prototype.resolve = function() {
 
 }
-/*
-CircuitElement.prototype.blah = function()  {
-    return "elem";
-}
-*/
-CircuitElement.prototype.processVerilog = function() {
 
+// Graph algorithm to resolve verilog wire labels 
+CircuitElement.prototype.processVerilog = function() {
+    // Output count used to sanitize output
     var output_total = 0;
     for (var i = 0; i < this.nodeList.length; i++) {
         if (this.nodeList[i].type == NODE_OUTPUT)
@@ -1433,18 +1430,21 @@ CircuitElement.prototype.processVerilog = function() {
     var output_count = 0;
     for (var i = 0; i < this.nodeList.length; i++) {
         if (this.objectType == "Clock") {
-            this.nodeList[i].verilogLabel = verilog.fixName(this.label);
+            this.nodeList[i].verilogLabel = verilog.santizeLabel(this.label);
         }
         if (this.nodeList[i].type == NODE_OUTPUT) {
-            this.nodeList[i].verilogLabel = this.nodeList[i].verilogLabel 
-                || (this.verilogLabel + "_" + (verilog.fixNameInv(this.nodeList[i].label) 
-                || ((output_total>1)?"out_" + output_count:"out")));
+            this.nodeList[i].verilogLabel = 
+            verilog.generateNodeName(this.nodeList[i], output_count, output_total);
             if (this.objectType != "Input" && this.nodeList[i].connections.length > 0) {
+
                 if (this.scope.verilogWireList[this.nodeList[i].bitWidth] != undefined) {
                     if (!this.scope.verilogWireList[this.nodeList[i].bitWidth].contains(this.nodeList[i].verilogLabel))
                         this.scope.verilogWireList[this.nodeList[i].bitWidth].push(this.nodeList[i].verilogLabel);
                 } else
                     this.scope.verilogWireList[this.nodeList[i].bitWidth] = [this.nodeList[i].verilogLabel];
+
+//                 if (!this.scope.verilogWireList[this.nodeList[i].bitWidth].contains(this.nodeList[i].verilogLabel))
+//                     this.scope.verilogWireList[this.nodeList[i].bitWidth].push(this.nodeList[i].verilogLabel);
             }
             this.scope.stack.push(this.nodeList[i]);
             output_count++;
@@ -1491,11 +1491,24 @@ CircuitElement.prototype.verilogName = function() {
     return this.verilogType || this.objectType;
 }
 
-CircuitElement.prototype.generateVerilog = function(tag) {
+CircuitElement.prototype.verilogBaseType = function() {
+    return this.verilogName();
+}
+
+CircuitElement.prototype.verilogParametrizedType = function() {
+    var type = this.verilogBaseType();
+    // Suffix bitwidth for multi-bit inputs
+    // Example: DflipFlop #(2) DflipFlop_0
+    if (this.bitWidth != undefined && this.bitWidth > 1)
+        type += " #(" + this.bitWidth + ")";
+    return type
+}
+
+// Generates final verilog code for each element
+CircuitElement.prototype.generateVerilog = function() {
+    // Example: and and_1(_out, _out, _Q[0]);
     var inputs = [];
     var outputs = [];
-
-    // console.log(this.objectType);
 
     for (var i = 0; i < this.nodeList.length; i++) {
         if (this.nodeList[i].type == NODE_INPUT) {
@@ -1506,19 +1519,11 @@ CircuitElement.prototype.generateVerilog = function(tag) {
     }
 
     var list = outputs.concat(inputs);
-    var res = this.verilogName();
+    var res = this.verilogParametrizedType();
 
-    if (tag != undefined)
-        res += tag;
-
-    //add this for mult-bit inputs
-    if (this.bitWidth != undefined && this.bitWidth > 1)
-      res += " #(" + this.bitWidth + ")";
-
-    res += " " + this.verilogLabel  + "(" + list.map(function(x) {
+    res += " " + this.verilogLabel + "(" + list.map(function(x) {
         return x.verilogLabel
     }).join(", ") + ");";
-
     return res;
 }
 
