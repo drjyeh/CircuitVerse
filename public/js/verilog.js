@@ -1,70 +1,71 @@
+/*
+    # Primary Developers
+    1) James H-J Yeh, Ph.D.
+    2) Satvik Ramaprasad
+    refer verilog_documentation.md 
+*/
+
 function convertVerilog() {
     var data = verilog.exportVerilog();
-
-    var element = document.createElement('a');
-    element.setAttribute('href', 'data:text/plain;charset=utf-8,' + encodeURIComponent(data));
-    element.setAttribute('download', projectName + ".v");
-    element.style.display = 'none';
-    document.body.appendChild(element);
-
-    element.click();
-
-    document.body.removeChild(element);
+    download(projectName + ".v", data);
 }
+
 verilog = {
-    exportVerilog:function(){
+    // Entry point to verilog generation
+    // scope = undefined means export all circuits
+    exportVerilog:function(scope = undefined){
         var dependencyList = {};
-        var completed = {};
-        for (id in scopeList)
-            dependencyList[id] = scopeList[id].getDependencies();
-
-		//call resetVerilog for the element if it exists 
-		//currently for Mux, Demux, Enc, Dec, can be useful for others
-		//**** is there a way to not use eval()?
+        
+        // Reset Verilog Element State
         for (var i = 0; i < circuitElementList.length; i++) {            
-            var str = circuitElementList[i] + ".resetVerilog"; // make sure this exists
-            if (eval(str)) {
-                output += eval(str + "();");
+            if (window[circuitElementList[i]].resetVerilog) {
+                window[circuitElementList[i]].resetVerilog();
             }
         }
 
-        var output = "";
-        for (id in scopeList) {
-            output  +=this.exportVerilogScope_r(id,completed,dependencyList);
-        }
+        // Generate SubCircuit Dependency Graph
+        for (id in scopeList)
+            dependencyList[id] = scopeList[id].getDependencies();
 
-		//call moduleVerilog to generate the element definition
-		//currently for DFF, TFF, Mux, Demux, Enc, Dec, can be useful for others
-		//**** is there a way to not use eval()?
-        for (var i = 0; i < circuitElementList.length; i++) {            
-            var str = circuitElementList[i] + ".moduleVerilog"; // make sure this exists
-            if (eval(str)) {
-                output += eval(str + "();");
+        // DFS on SubCircuit Dependency Graph
+        var visited = {};
+        var elementTypesUsed = new Set();
+        var output = "";
+        if(scope) {
+            // generate verilog only for scope
+            output += this.exportVerilogScope(scope.id,visited,dependencyList, elementTypesUsed);
+        }
+        else {
+            // generate verilog for everything
+            for (id in scopeList) {
+                output += this.exportVerilogScope(id,visited,dependencyList, elementTypesUsed);
+            }
+        }
+        // Add Circuit Element - Module Specific Verilog Code
+        for(var element of elementTypesUsed) {
+            // If element has custom verilog
+            if (window[element].moduleVerilog) {
+                output += window[element].moduleVerilog();
             }
         }
         return output;
     },
-    exportVerilogScope:function(scope=globalScope){
-        var dependencyList = {};
-        var completed = {};
-        for (id in scopeList)
-            dependencyList[id] = scopeList[id].getDependencies();
+    // Recursive DFS function
+    exportVerilogScope: function(id,visited,dependencyList, elementTypesUsed){
+        // Already Visited
+        if (visited[id]) return "";
+        // Mark as Visited
+        visited[id] = true;
 
-        var output = this.exportVerilogScope_r(scope.id,completed,dependencyList);
-
-        return output;
-
-    },
-    exportVerilogScope_r: function(id,completed={},dependencyList={}){
         var output = "";
-        if (completed[id]) return output;
-
-        for (var i = 0; i < dependencyList[id].length; i++)
-            output += this.exportVerilogScope_r(dependencyList[id][i],completed,dependencyList)+"\n";
-        completed[id] = true;
-
+        // DFS on dependencies
+        if (dependencyList[id] != undefined) {
+         for (var i = 0; i < dependencyList[id].length; i++)
+                output += this.exportVerilogScope(dependencyList[id][i],visited,dependencyList, elementTypesUsed)+"\n";
+        }
         var scope = scopeList[id];
-    	// This part is explicitely added to add the Clock and process its outputs
+
+    	// This part is explicitely added to add the SubCircuit and process its outputs        
         for(var i = 0; i < scope.Clock.length; i++) {
 //            console.log(scope.Clock[i].label);
             if (scope.Clock[i].label == "") {
@@ -72,25 +73,46 @@ verilog = {
 //                console.log(scope.Clock[i].label);
             }
         }
+        // Initialize labels for all elements
         this.resetLabels(scope);
-        this.getReady(scope);
+        this.setLabels(scope);
 
         output += this.generateHeader(scope);
         output += this.generateOutputList(scope); // generate output first to be consistent
         output += this.generateInputList(scope);
-        var res = this.processGraph(scope);
+        output += "\n";
+
+         // Note: processGraph function populates scope.verilogWireList
+        var res = this.processGraph(scope, elementTypesUsed);
+
+        // Generate Wire Initialization Code
+/* Partially from PR1814
+        for (var bitWidth = 1; bitWidth<= 32; bitWidth++){
+            if(scope.verilogWireList[bitWidth].length == 0) 
+                continue;
+            if(bitWidth == 1)
+                output += "  wire " + scope.verilogWireList[bitWidth].join(", ") + ";\n";
+            else
+                output += "  wire [" +(bitWidth-1)+":0] " + scope.verilogWireList[bitWidth].join(", ") + ";\n";
+        }
+*/
         for (bitWidth in scope.verilogWireList){
             if(bitWidth == 1)
                 output += "  wire " + scope.verilogWireList[bitWidth].join(", ") + ";\n";
             else
                 output += "  wire [" +(bitWidth-1)+":0] " + scope.verilogWireList[bitWidth].join(", ") + ";\n";
         }
+        output += "\n";
+
+        // Append Wire connections and module instantiations
         output += res;
 
+        // Append footer
         output += "endmodule\n";
         return output;
     },
-    processGraph: function(scope=globalScope){
+    // Performs DFS on the graph and generates netlist of wires and connections
+    processGraph: function(scope, elementTypesUsed){
         var res = "";
         scope.stack = [];
         scope.pending = [];
@@ -117,21 +139,6 @@ verilog = {
             order.push(scope.Output[i]);
             // scope.Output[i].processVerilog();
         }
-
-        /* for making DigitalLed Output
-        // This part is explicitely added to add the DigitalLed and process its outputs
-        for(var i = 0; i < scope.DigitalLed.length; i++){
-            order.push(scope.DigitalLed[i]);
-            // scope.DigitalLed[i].processVerilog();
-        }
-
-		// for making HexDisplay Output
-        // This part is explicitely added to add the HexDisplay and process its outputs
-        for(var i = 0; i < scope.HexDisplay.length; i++){
-            order.push(scope.HexDisplay[i]);
-            // scope.HexDisplay[i].processVerilog();
-        }
-        */
         
         // This part is explicitely added to add the Splitter INPUTS and process its outputs
         for(var i = 0; i < scope.Splitter.length; i++){
@@ -149,6 +156,10 @@ verilog = {
                 elem = scope.pending.pop();
             // console.log(elem)
             elem.processVerilog();
+            
+            // Record usage of element type
+            elementTypesUsed.add(elem.objectType);
+
             if(elem.objectType != "Node" && elem.objectType != "Clock" 
                 && elem.objectType != "Input" && elem.objectType != "Splitter") {
                 if(!order.contains(elem))
@@ -168,86 +179,130 @@ verilog = {
             res += "  " + elem.generateVerilog() + "\n";
         }
         return res;
-    },
 
+/* Partially from PR1814
+        // Initializations
+        var res = "";
+        scope.stack = [];
+        scope.verilogWireList = [];
+        for(var i = 0; i <= 32; i++)
+            scope.verilogWireList.push(new Array());
+
+        var verilogResolvedSet = new Set();
+
+        // Start DFS from inputs
+        for (var i = 0; i < inputList.length; i++) {
+            for (var j = 0; j < scope[inputList[i]].length; j++) {
+                scope.stack.push(scope[inputList[i]][j]);
+            }
+        }
+        
+        // This part is explicitely added to add the SubCircuit and process its outputs
+        for(var i = 0; i < scope.SubCircuit.length; i++){
+            scope.stack.push(scope.SubCircuit[i]);
+            scope.SubCircuit[i].processVerilog();
+        }
+        
+        // This part is explicitely added to add the Outputs and process its outputs
+        for(var i = 0; i < scope.Output.length; i++){
+            scope.stack.push(scope.Output[i]);
+            // scope.Output[i].processVerilog();
+        }
+
+        // This part is explicitely added to add the Splitter INPUTS and process its outputs
+        for(var i = 0; i < scope.Splitter.length; i++){
+            console.log(scope.Splitter[i]);
+                scope.stack.push(scope.Splitter[i]);
+                scope.Splitter[i].processVerilog();
+        }
+
+        // Iterative DFS on circuit graph
+        while (scope.stack.length) {
+            if (errorDetected) return;
+            var elem = scope.stack.pop();
+
+            if(verilogResolvedSet.has(elem))
+                continue;
+
+            // Process verilog creates variable names and adds elements to DFS stack
+            elem.processVerilog();
+
+            // Record usage of element type
+            elementTypesUsed.add(elem.objectType);
+
+            if(elem.objectType != "Node" && elem.objectType != "Clock" 
+                && elem.objectType != "Input" && elem.objectType != "Splitter") {
+                verilogResolvedSet.add(elem);
+            }
+        }
+
+        // Generate connection verilog code and module instantiations
+        for(var elem of verilogResolvedSet) {
+            res += "  " + elem.generateVerilog() + "\n";
+        }
+        return res;
+*/
+    },
     resetLabels: function(scope){
         for(var i=0;i<scope.allNodes.length;i++){
             scope.allNodes[i].verilogLabel="";
         }
     },
-    getReady: function(scope=globalScope){
+    // Sets labels for all Circuit Elements elements
+    setLabels: function(scope=globalScope){
+        /**
+         * Sets a name for each element. If element is already labeled,
+         * the element is used directly, otherwise an automated label is provided
+         * santizeLabel is a helper function to escape white spaces
+         */
         for(var i=0;i<scope.Input.length;i++){
             if(scope.Input[i].label=="")
                 scope.Input[i].label="inp_"+i;
             else
-                scope.Input[i].label=this.fixName(scope.Input[i].label)
-
-            scope.Input[i].output1.verilogLabel=scope.Input[i].label;
+                scope.Input[i].label=this.santizeLabel(scope.Input[i].label)
+            // copy label to node
+            scope.Input[i].output1.verilogLabel = scope.Input[i].label;
         }
         for(var i=0;i<scope.ConstantVal.length;i++){
             if(scope.ConstantVal[i].label=="")
                 scope.ConstantVal[i].label="const_"+i;
             else
-                scope.ConstantVal[i].label=this.fixName(scope.ConstantVal[i].label)
-
+                scope.ConstantVal[i].label=this.santizeLabel(scope.ConstantVal[i].label)
+            // copy label to node
             scope.ConstantVal[i].output1.verilogLabel=scope.ConstantVal[i].label;
         }
         for(var i=0;i<scope.Output.length;i++){
             if(scope.Output[i].label=="")
                 scope.Output[i].label="out_"+i;
             else
-                scope.Output[i].label=this.fixName(scope.Output[i].label)
+                scope.Output[i].label=this.santizeLabel(scope.Output[i].label)
         }
-        /* for making them output
-        for(var i=0;i<scope.DigitalLed.length;i++){
-            if(scope.DigitalLed[i].label=="")
-                scope.DigitalLed[i].label="led_"+i;
-            else
-                scope.DigitalLed[i].label=this.fixName(scope.DigitalLed[i].label)
-        }
-        for(var i=0;i<scope.HexDisplay.length;i++){
-            if(scope.HexDisplay[i].label=="")
-                scope.HexDisplay[i].label="hexdisp_"+i;
-            else
-                scope.HexDisplay[i].label=this.fixName(scope.HexDisplay[i].label)
-        }
-        */
         for(var i=0;i<scope.SubCircuit.length;i++){
             if(scope.SubCircuit[i].label=="")
                 scope.SubCircuit[i].label=scope.SubCircuit[i].data.name+"_"+i;
             else
-                scope.SubCircuit[i].label=this.fixName(scope.SubCircuit[i].label)
+                scope.SubCircuit[i].label=this.santizeLabel(scope.SubCircuit[i].label)
         }
         for(var i=0;i<moduleList.length;i++){
             var m = moduleList[i];
-            // console.log(m)
             for(var j=0;j<scope[m].length;j++){
-                scope[m][j].verilogLabel = this.fixName(scope[m][j].label) || (scope[m][j].verilogName()+"_"+j);
+                scope[m][j].verilogLabel = this.santizeLabel(scope[m][j].label) || (scope[m][j].verilogName()+"_"+j);
             }
         }
     },
     generateHeader:function(scope=globalScope){
-        var res="\nmodule " + this.fixName(scope.name) + "(";
-
+        // Example: module HalfAdder (a,b,s,c);
+        var res="\nmodule " + this.santizeLabel(scope.name) + "(";
         var pins = [];
         for(var i=0;i<scope.Output.length;i++){
             pins.push(scope.Output[i].label);
         }
-        /* for making them output
-        for(var i=0;i<scope.DigitalLed.length;i++){
-            pins.push(scope.DigitalLed[i].label);
-        }  
-        for(var i=0;i<scope.HexDisplay.length;i++){
-            pins.push(scope.HexDisplay[i].label);
-        }
-        */              
         for(var i=0;i<scope.Clock.length;i++){
             pins.push(scope.Clock[i].label);
         }
         for(var i=0;i<scope.Input.length;i++){
             pins.push(scope.Input[i].label);
         }
-
         res += pins.join(", ");
         res += ");\n";
         return res;
@@ -277,6 +332,7 @@ verilog = {
         return res;
     },
     generateOutputList:function(scope=globalScope){
+        // Example 1: output s,cout;
         var outputs={}
         for(var i=0;i<scope.Output.length;i++){
             if(outputs[scope.Output[i].bitWidth])
@@ -284,20 +340,6 @@ verilog = {
             else
                 outputs[scope.Output[i].bitWidth] = [scope.Output[i].label];
         }
-        /* for making them output
-        for(var i=0;i<scope.DigitalLed.length;i++){
-            if(outputs[scope.DigitalLed[i].bitWidth])
-                outputs[scope.DigitalLed[i].bitWidth].push(scope.DigitalLed[i].label);
-            else
-                outputs[scope.DigitalLed[i].bitWidth] = [scope.DigitalLed[i].label];
-        }
-        for(var i=0;i<scope.HexDisplay.length;i++){
-            if(outputs[scope.HexDisplay[i].bitWidth])
-                outputs[scope.HexDisplay[i].bitWidth].push(scope.HexDisplay[i].label);
-            else
-                outputs[scope.HexDisplay[i].bitWidth] = [scope.HexDisplay[i].label];
-        }
-        */
         var res="";
         for (bitWidth in outputs){
             if(bitWidth==1)
@@ -308,17 +350,11 @@ verilog = {
 
         return res;
     },
-    fixNameInv: function(name){
-        return name.replace(/ Inverse/g, "_inv").replace(/ /g , "_");
-    },
-    fixName: function(name){
-        return name.replace(/ /g , "_");
-    },
     santizeLabel: function(name){
         return name.replace(/ Inverse/g, "_inv").replace(/ /g , "_");
     },
     generateNodeName: function(node, currentCount, totalCount) {
-        if (node.verilogLabel) return node.verilogLabel;
+        if(node.verilogLabel) return node.verilogLabel;
         var parentVerilogLabel = node.parent.verilogLabel;
         var nodeName;
         if(node.label) {

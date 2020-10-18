@@ -1818,6 +1818,7 @@ Splitter.prototype.processVerilog = function () {
     */
     if (this.inp1.verilogLabel == "") {
         this.inp1.verilogLabel = this.verilogLabel + "_inp";
+        console.log(this.verilogLabel)
         if (this.scope.verilogWireList[this.bitWidth] != undefined) {
             if (!this.scope.verilogWireList[this.bitWidth].contains(this.inp1.verilogLabel))
                 this.scope.verilogWireList[this.bitWidth].push(this.inp1.verilogLabel);
@@ -2346,7 +2347,7 @@ ConstantVal.prototype.resolve = function () {
 }
 ConstantVal.prototype.dblclick = function () {
     this.state = prompt("Re enter the value") || "0";
-    console.log(this.state);
+    //console.log(this.state);
     this.newBitWidth(this.state.toString().length);
     //console.log(this.state, this.bitWidth);
 }
