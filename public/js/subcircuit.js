@@ -375,7 +375,7 @@ SubCircuit.prototype.generateVerilog = function() {
 }
 
 SubCircuit.prototype.verilogName = function() {
-    return verilog.fixName(scopeList[this.id].name);
+    return verilog.santizeLabel(scopeList[this.id].name);
 }
 
 SubCircuit.prototype.customDraw = function() {

@@ -64,7 +64,7 @@ verilog = {
         completed[id] = true;
 
         var scope = scopeList[id];
-    	// This part is explicitely added to add the SubCircuit and process its outputs
+    	// This part is explicitely added to add the Clock and process its outputs
         for(var i = 0; i < scope.Clock.length; i++) {
 //            console.log(scope.Clock[i].label);
             if (scope.Clock[i].label == "") {
@@ -313,5 +313,20 @@ verilog = {
     },
     fixName: function(name){
         return name.replace(/ /g , "_");
+    },
+    santizeLabel: function(name){
+        return name.replace(/ Inverse/g, "_inv").replace(/ /g , "_");
+    },
+    generateNodeName: function(node, currentCount, totalCount) {
+        if (node.verilogLabel) return node.verilogLabel;
+        var parentVerilogLabel = node.parent.verilogLabel;
+        var nodeName;
+        if(node.label) {
+            nodeName = verilog.santizeLabel(node.label);
+        }
+        else {
+            nodeName = (totalCount > 1) ? "out_" + currentCount: "out";
+        }
+        return parentVerilogLabel + "_" + nodeName;
     }
 }

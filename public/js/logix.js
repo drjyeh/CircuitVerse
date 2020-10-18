@@ -1440,11 +1440,11 @@ CircuitElement.prototype.processVerilog = function() {
                 || (this.verilogLabel + "_" + (verilog.fixNameInv(this.nodeList[i].label) 
                 || ((output_total>1)?"out_" + output_count:"out")));
             if (this.objectType != "Input" && this.nodeList[i].connections.length > 0) {
-                if (this.scope.verilogWireList[this.bitWidth] != undefined) {
-                    if (!this.scope.verilogWireList[this.bitWidth].contains(this.nodeList[i].verilogLabel))
-                        this.scope.verilogWireList[this.bitWidth].push(this.nodeList[i].verilogLabel);
+                if (this.scope.verilogWireList[this.nodeList[i].bitWidth] != undefined) {
+                    if (!this.scope.verilogWireList[this.nodeList[i].bitWidth].contains(this.nodeList[i].verilogLabel))
+                        this.scope.verilogWireList[this.nodeList[i].bitWidth].push(this.nodeList[i].verilogLabel);
                 } else
-                    this.scope.verilogWireList[this.bitWidth] = [this.nodeList[i].verilogLabel];
+                    this.scope.verilogWireList[this.nodeList[i].bitWidth] = [this.nodeList[i].verilogLabel];
             }
             this.scope.stack.push(this.nodeList[i]);
             output_count++;
@@ -1491,7 +1491,7 @@ CircuitElement.prototype.verilogName = function() {
     return this.verilogType || this.objectType;
 }
 
-CircuitElement.prototype.generateVerilog = function() {
+CircuitElement.prototype.generateVerilog = function(tag) {
     var inputs = [];
     var outputs = [];
 
@@ -1508,11 +1508,14 @@ CircuitElement.prototype.generateVerilog = function() {
     var list = outputs.concat(inputs);
     var res = this.verilogName();
 
+    if (tag != undefined)
+        res += tag;
+
     //add this for mult-bit inputs
     if (this.bitWidth != undefined && this.bitWidth > 1)
       res += " #(" + this.bitWidth + ")";
 
-    res += " " + this.verilogLabel + "(" + list.map(function(x) {
+    res += " " + this.verilogLabel  + "(" + list.map(function(x) {
         return x.verilogLabel
     }).join(", ") + ");";
 
